@@ -4,6 +4,13 @@
 
 首个封装版本（上游 yt-dlp Web UI 4.0.0）。
 
+**发布记录**：
+- 打包仓库 `github.com/Moechz/yt-dlp-web-ui`（main）；
+- CI 源码构建 Release **`build-v4.0.0`**（run 37261760200 全绿）：`ytdlpwebui-linux-{amd64,arm64}.tar.gz`、
+  `qjs-linux-{amd64,arm64}.tar.gz` + `SHA256SUMS`；sha256 已回填 `config.env`；
+- 上架 Release **`v4.0.0-1`**：`ytdlpwebui_x86_64.deb`（amd64）、`ytdlpwebui_aarch64.deb`（arm64）
+  及各自 `.sha256`（匿名下载复核 sha256 一致）。
+
 - 新增：TOS 7 应用中心 deb 打包工程（`config.env` / `build.sh` / `makedeb.sh` / `Makefile` /
   `assets/` / `patches/` / `scripts/`）。
 - 架构：新标签页（External Open）+ 回环 `127.0.0.1:13033` + nginx 剥离前缀反代 `/ytdlpwebui/`。
