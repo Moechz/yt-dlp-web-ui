@@ -1,0 +1,20 @@
+# 构建产物与下载缓存
+build/
+out/
+
+# macOS
+.DS_Store
+._*
+
+# 本地编辑器
+*.swp
+.idea/
+.vscode/
+
+# 内部交接文档（含内网/测试机信息，勿推公开仓库 —— 打包指南坑 20）
+AGENTS.md
+HANDOFF.md
+docs/TASK_STATE.md
+
+# 日志
+*.log

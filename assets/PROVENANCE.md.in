@@ -1,0 +1,52 @@
+# yt-dlp Web UI for TOS — Component Provenance / 组件来源与构建方式
+
+Package version: **@@VERSION@@** ｜ Build mode: **@@BUILD_MODE@@** ｜ Target arch: **@@TARGET_ARCH@@**
+
+本文件随 deb 分发（`/usr/local/ytdlpwebui/PROVENANCE.md`），说明包内每个可执行载荷的来源，
+供 TOS 应用中心审核与后续维护审计。审计链：上游源码 tag → 本仓库公开 workflow →
+公开 Actions 日志 → Release 资产 sha256 pin（config.env）。
+
+## 1. 包内可执行载荷
+
+| 路径 | 组件 | 版本 | 来源 / 构建方式 |
+|---|---|---|---|
+| `bin/ytdlpwebui` | 后端（Go + 内嵌前端） | @@UPSTREAM_VERSION@@ | 上游 `marcopiovanello/yt-dlp-web-ui` 源码 tag `v@@UPSTREAM_VERSION@@`；`source` 模式由 `.github/workflows/build-upstream.yml` 在 ubuntu runner 上 `pnpm build`（前端）+ `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w"` 静态构建；`compat` 模式直接取上游官方 Release 资产（不可提交商店） |
+| `bin/yt-dlp` | yt-dlp 下载器 | @@YTDLP_VERSION@@ | yt-dlp 官方 Release 的 **Python zipapp**（`yt-dlp` 资产，纯 `.py` 源码 + `yt_dlp_ejs`，非 ELF、可审计）；由 TOS 系统 `/usr/bin/python3` 运行（`Depends: python3`）。sha256 pin 在 `config.env` |
+| `bin/qjs` | quickjs-ng JS 运行时 | @@QUICKJS_VERSION@@ | `source` 模式由 CI 从 `quickjs-ng/quickjs` 源码 tag `@@QUICKJS_VERSION@@` 用 CMake 构建（`cmake --build build --target qjs_exe`）并 strip；`compat` 模式取官方 release 二进制。sha256 pin 在 `config.env` |
+
+## 2. 不随包分发的系统依赖
+
+| 组件 | 用途 | 说明 |
+|---|---|---|
+| `ffmpeg` | 合并分离的视频/音频流、转封装、后处理 | TOS 系统软件包（Ubuntu 22.04 universe，真机预装），`Depends: ffmpeg`。**不随包分发预编译 ELF**（V6 合规） |
+| `python3` | 运行 `bin/yt-dlp` zipapp | TOS 系统软件包（Python 3.10.x），`Depends: python3`。yt-dlp zipapp 已内嵌 `yt_dlp_ejs`，无需联网取求解器即可启用 EJS |
+| `systemd` | 服务生命周期与沙箱 | `Depends: systemd` |
+
+## 3. 运行期外联（用户主动发起，非安装期）
+
+- 用户提交 URL 时：由 `bin/yt-dlp` 直接连接目标站点下载媒体。
+- 用户点击「更新 yt-dlp」按钮时：`yt-dlp -U` 访问其官方发布渠道。
+- yt-dlp 处理 YouTube 时可能按 `--remote-components ejs:github` 拉取辅助求解组件（不含个人数据）。
+
+**安装期零外联**：所有 deb 维护脚本（preinst/postinst/prerm/postrm）不做任何在线安装或下载（S8 红线），
+校验方式见 `build.sh verify` 的「S8 零在线安装自检」。
+
+## 4. 安全配置
+
+- 服务仅监听 `127.0.0.1:13033`（回环），唯一入口为 TOS nginx 网关 `/<appid>/` 路由。
+- 专用非 root 用户 `ytdlpwebui` 运行；systemd 沙箱：`NoNewPrivileges`、
+  `ProtectSystem=full`、`ProtectHome=read-only`、`CapabilityBoundingSet=`（空集）、
+  `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` 等。
+- 不配置 `Restart`/`RestartSec`（生命周期归应用中心管理）。
+- 数据目录 `/var/lib/ytdlpwebui`：`apt remove` 保留，`apt purge` 删除。
+
+## 5. 许可证
+
+| 组件 | 许可证 |
+|---|---|
+| yt-dlp Web UI（上游） | GPL-3.0（全文见 `/usr/share/doc/ytdlpwebui/copyright`） |
+| yt-dlp | Unlicense / ISC / MIT（第三方清单见上游仓库 `THIRD_PARTY_LICENSES.txt`） |
+| quickjs-ng | MIT |
+| ffmpeg（系统包） | LGPL/GPL（由 TOS 发行版提供） |
+
+打包者：Moechz（deb `Maintainer`）；上游作者：marcopiovanello。

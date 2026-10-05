@@ -1,0 +1,181 @@
+#!/bin/bash
+# postinst - 安装/升级后处理
+# 组件树（/usr/local/ytdlpwebui 下的二进制/运行时/配置/服务）随 deb 分发，
+# postinst 负责"派生状态"：属主、webui 解压、系统层注册（服务+nginx）、
+# 首装配置引导、NNP 兼容探测、启动与健康轮询。
+# 注：经 TOS 应用中心安装时平台也会注册 init.d 服务与 nginx 配置，
+# 本脚本的操作全部幂等，两条安装路径行为一致。
+set -e
+
+APP_DIR=/usr/local/ytdlpwebui
+APP_USER=ytdlpwebui
+DATA_DIR=/var/lib/ytdlpwebui
+MAINT_LOG=/var/log/ytdlpwebui-maint.log
+UNIT=ytdlpwebui.service
+DROPIN_DIR=/etc/systemd/system/${UNIT}.d
+DROPIN_COMPAT=80-ytdlpwebui-exec-compat.conf
+
+pkg_log() {
+  mkdir -p /var/log 2>/dev/null || true
+  echo "$(date '+%F %T') $*" >> "$MAINT_LOG" 2>/dev/null || true
+}
+# 维护日志收敛为 root 可读写（默认 umask 下 0644 会泄露排障细节给本机普通用户）
+chmod 0600 "$MAINT_LOG" 2>/dev/null || true
+pkg_log postinst "$1" "new=@VERSION@${2:+ old=$2}"
+
+case "$1" in
+  configure)
+    # 1. 用户兜底（preinst 已建；平台自动创建路径亦覆盖）
+    if ! id -u $APP_USER > /dev/null 2>&1; then
+      useradd --system --user-group --no-create-home --shell /usr/sbin/nologin $APP_USER 2>/dev/null || true
+    fi
+
+    # 2. 文件属主（官方 postinst 模板：应用目录归运行用户）
+    chown -R $APP_USER:$APP_USER "$APP_DIR" 2>/dev/null || true
+
+    # 3. 解压 webui.bz2（官方模板行为；External 模式下为占位页）
+    if [ -f "$APP_DIR/webui.bz2" ]; then
+      ( cd "$APP_DIR" && tar -xjf webui.bz2 2>/dev/null || true )
+    fi
+
+    # 4. 环境变量文件首装引导：仅在不存在时从随包模板复制（升级永不覆盖用户配置，
+    #    conffile 交互提示会卡死商店安装——坑 2）
+    if [ ! -e "$APP_DIR/ytdlpwebui.env" ] && [ -e "$APP_DIR/ytdlpwebui.env.example" ]; then
+      install -m 0640 -o $APP_USER -g $APP_USER \
+        "$APP_DIR/ytdlpwebui.env.example" "$APP_DIR/ytdlpwebui.env"
+      pkg_log postinst bootstrap "ytdlpwebui.env 首装"
+    fi
+
+    # 5. 数据目录（队列数据库 / 下载文件 / 日志）
+    install -d -o $APP_USER -g $APP_USER -m 0750 "$DATA_DIR" "$DATA_DIR/downloads"
+
+    # 5b. 运行时依赖探测（S8 红线：deb 脚本严禁在线安装，缺失只提示）
+    #     yt-dlp 是 Python zipapp，需要系统 python3；ffmpeg 用于合流；
+    #     quickjs(qjs) 与 yt-dlp 随包分发在 $APP_DIR/bin。
+    MISSING=""
+    command -v python3 > /dev/null 2>&1 || MISSING="$MISSING python3"
+    [ -x /usr/bin/ffmpeg ] || command -v ffmpeg > /dev/null 2>&1 || MISSING="$MISSING ffmpeg"
+    [ -x "$APP_DIR/bin/qjs" ] || MISSING="$MISSING qjs"
+    [ -x "$APP_DIR/bin/yt-dlp" ] || MISSING="$MISSING yt-dlp"
+    if [ -n "$MISSING" ]; then
+      echo "警告: 缺少运行时组件:$MISSING（control 已声明 Depends: python3, ffmpeg）" >&2
+      echo "        正常安装路径会自动装齐；请手工执行: apt-get -f install" >&2
+      pkg_log postinst "运行时缺失:$MISSING（已提示，未在线安装）"
+    else
+      pkg_log postinst "运行时齐备: python3=$(python3 --version 2>&1) ffmpeg=$(command -v ffmpeg)"
+    fi
+
+    # 6. NNP 兼容探测（坑 23：个别 TOS 构建在 NoNewPrivileges 下拒绝一切 execve，
+    #    203/EXEC 起不来；--collect 自动清残留 unit；仅失败时装最小降级 drop-in，
+    #    服务用户/能力边界/socket 一概不变）
+    if [ "${YTDLPWEBUI_EXEC_COMPAT:-auto}" = "force" ]; then
+      NNP_OK=0
+    elif [ "${YTDLPWEBUI_EXEC_COMPAT:-auto}" = "off" ]; then
+      NNP_OK=1
+    else
+      if timeout 15 systemd-run --wait --collect -p NoNewPrivileges=true /bin/true >/dev/null 2>&1; then
+        NNP_OK=1
+      else
+        NNP_OK=0
+      fi
+    fi
+    if [ "$NNP_OK" = "1" ]; then
+      if [ -f "$DROPIN_DIR/$DROPIN_COMPAT" ]; then
+        rm -f "$DROPIN_DIR/$DROPIN_COMPAT"
+        pkg_log postinst "NNP 探测通过，移除降级 drop-in"
+      fi
+      if [ -d "$DROPIN_DIR" ]; then
+        for f in "$DROPIN_DIR"/*.conf; do
+          [ -e "$f" ] || continue
+          case "$(basename "$f")" in
+            "$DROPIN_COMPAT") ;;
+            *) echo "提示: 存在自定义 drop-in $(basename "$f")，本包不改动它" >&2 ;;
+          esac
+        done
+      fi
+    else
+      install -d "$DROPIN_DIR"
+      cat > "$DROPIN_DIR/$DROPIN_COMPAT" <<'EOF'
+# 自动生成：本机 systemd 在 NoNewPrivileges 下拒绝 execve（坑 23 兼容降级）
+# 仅放宽 NNP 与 RestrictSUIDSGID；服务用户、能力边界与其他沙箱项一律不变
+[Service]
+NoNewPrivileges=false
+RestrictSUIDSGID=false
+EOF
+      pkg_log postinst "NNP 探测失败，安装降级 drop-in $DROPIN_COMPAT"
+    fi
+
+    # 7. 系统层注册（幂等；应用中心安装时平台也会做同样的事）
+    install -m 0644 "$APP_DIR/init.d/$UNIT" /etc/systemd/system/$UNIT
+    systemctl daemon-reload
+
+    # 启用（幂等，升级路径 prerm 只停不拆故必须重 enable）并（重）启动
+    systemctl enable $UNIT > /dev/null 2>&1 || true
+    if [ -n "${2:-}" ]; then
+      systemctl restart $UNIT 2>/dev/null || true
+    else
+      systemctl start $UNIT 2>/dev/null || true
+    fi
+
+    # 8. nginx 路由（TOS 平台会加载 nginx/<appid>.conf，此处在系统 nginx 兜底注册）
+    # 注意：裸 location 仅在 server 上下文合法（TOS 的 conf.d 即 include 在 server 层；
+    # 原生 Ubuntu 的 conf.d 在 http 层会 nginx -t 失败——坑 5）；
+    # 写入后立即 nginx -t 校验，失败则回滚，绝不留下导致 nginx 无法 reload 的配置
+    if command -v nginx > /dev/null 2>&1 && [ -d /etc/nginx/conf.d ]; then
+      install -m 0644 "$APP_DIR/nginx/ytdlpwebui.conf" \
+        /etc/nginx/conf.d/ytdlpwebui.conf
+      if nginx -t > /dev/null 2>&1; then
+        nginx -s reload > /dev/null 2>&1 || true
+      else
+        rm -f /etc/nginx/conf.d/ytdlpwebui.conf
+        echo "提示: 本机 nginx 的 conf.d 不在 server 上下文，已跳过自动注册 /ytdlpwebui/。" >&2
+        echo "      请把 $APP_DIR/nginx/ytdlpwebui.conf 的 location 段手工加入对应 server 块。" >&2
+      fi
+    fi
+
+    # 9. 就绪轮询（坑 26：restart 成功 ≠ 就绪；首轮启动要建 bolt.db 队列库，
+    #    数秒常见；30s 上限，超时打有限快照入 dpkg 日志，不无限等待）
+    WAITED=0
+    until curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:13033/ 2>/dev/null; do
+      WAITED=$((WAITED + 2))
+      if [ "$WAITED" -ge 30 ]; then
+        echo "提示: 服务 30s 内未就绪，排查命令:" >&2
+        echo "      journalctl -u ytdlpwebui -n 50 --no-pager" >&2
+        echo "      tail -n 50 $DATA_DIR/yt-dlp-webui.log" >&2
+        systemctl --no-pager -l -n 15 status $UNIT >&2 || true
+        pkg_log postinst "就绪轮询 30s 超时（已打印快照）"
+        break
+      fi
+      sleep 2
+    done
+    [ "$WAITED" -ge 30 ] || pkg_log postinst "服务就绪（${WAITED}s 内 HTTP 200）"
+
+    # 健康告警（只在 failed 时；未就绪 ≠ failed）
+    if systemctl is-failed --quiet $UNIT; then
+      echo "警告: ytdlpwebui 启动失败，排查: journalctl -u ytdlpwebui -n 50 --no-pager" >&2
+    fi
+
+    # 10. 沙箱生效值入安装日志（坑 27：供审核/排障对照）
+    pkg_log postinst "unit 生效: $(systemctl show $UNIT -p NoNewPrivileges -p CapabilityBoundingSet 2>/dev/null | tr '\n' ' ')"
+
+    pkg_log postinst done "@VERSION@"
+    echo ""
+    if [ -n "${2:-}" ]; then
+      echo "yt-dlp Web UI @VERSION@ 已完成升级（自 $2）。"
+    else
+      echo "yt-dlp Web UI @VERSION@ 已安装。"
+    fi
+    echo "  打开界面 : TOS 桌面 → yt-dlp Web UI 图标（新标签页打开 http://<NAS的IP>:8181/ytdlpwebui/）"
+    echo "  使用方法 : 粘贴视频/播放列表链接 → 选择格式（或自动最高画质）→ 开始下载"
+    echo "  下载目录 : /var/lib/ytdlpwebui/downloads（默认；用应用内「文件浏览」取回文件）"
+    echo "             如需保存到共享卷，先在共享文件夹里给应用用户 ytdlpwebui 授权，"
+    echo "             再改 /usr/local/ytdlpwebui/ytdlpwebui.env 的 APP_PATHS_DOWNLOAD_PATH"
+    echo "  配置修改 : 编辑 /usr/local/ytdlpwebui/ytdlpwebui.env 后 systemctl restart ytdlpwebui"
+    echo "  端口说明 : 仅监听 127.0.0.1:13033，不对外暴露端口（经 TOS nginx 路由访问）"
+    echo "  运行时   : yt-dlp（官方 Python zipapp）+ quickjs-ng（随包）；ffmpeg 用 TOS 系统包"
+    echo "  数据目录 : /var/lib/ytdlpwebui（apt remove 保留，purge 删除）"
+    echo ""
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,30 @@
+Package: ytdlpwebui
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: @MAINTAINER@
+Installed-Size: @SIZE@
+Depends: systemd, python3, ffmpeg
+Recommends: python3-requests, python3-certifi, ca-certificates
+Section: video
+Priority: optional
+Homepage: https://github.com/marcopiovanello/yt-dlp-web-ui
+Description: yt-dlp Web UI - web interface for the yt-dlp downloader
+ A self-hosted web UI and RPC server for yt-dlp: paste a video URL,
+ pick or auto-select the best quality, and the NAS downloads it in the
+ background with a live progress view and a download queue. Lists,
+ searches and serves the finished files from the browser, and can be
+ reached from any device on your LAN.
+ .
+ This package bundles the yt-dlp Python zipapp and the quickjs-ng
+ JavaScript runtime (required by yt-dlp to solve YouTube player
+ challenges); both are built from public sources. ffmpeg is used from
+ the TOS system packages for stream merging.
+ .
+ The web UI opens in a new browser tab via the TOS App Center route
+ /ytdlpwebui/. The backend listens on loopback only: no external port
+ is exposed, and all traffic goes through the TOS web server.
+ Downloads, the queue database and logs are stored in
+ /var/lib/ytdlpwebui; 'apt remove' keeps them, 'apt purge' deletes them.
+ .
+ Upstream: https://github.com/marcopiovanello/yt-dlp-web-ui (GPL-3.0)
+ Upstream author: marcopiovanello. Packaged for TOS by the deb Maintainer.

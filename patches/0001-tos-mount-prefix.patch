@@ -1,0 +1,41 @@
+diff --git a/frontend/src/atoms/settings.ts b/frontend/src/atoms/settings.ts
+index 1e87a4f..0261d6f 100644
+--- a/frontend/src/atoms/settings.ts
++++ b/frontend/src/atoms/settings.ts
+@@ -118,6 +118,18 @@ export const appTitleState = atomWithStorage(
+   localStorage.getItem('appTitle') ?? 'yt-dlp Web UI'
+ )
+ 
++// TOS patch (Moechz/yt-dlp-web-ui): when the app is served from a
++// reverse-proxy sub-path such as https://<nas>:8181/ytdlpwebui/, the mount
++// prefix lives in window.location.pathname. The upstream code only knows
++// hostname:port, so REST/RPC/WebSocket calls would miss the proxied route
++// and hit the server root. Derive the prefix from the browser path and
++// append it; when the app runs at the site root the prefix is empty and
++// behaviour is unchanged.
++const tosMountPrefix = () => {
++  const p = window.location.pathname.replace(/\/+$/, '')
++  return p === '/' ? '' : p
++}
++
+ export const serverAddressAndPortState = atom((get) => {
+   if (get(servedFromReverseProxySubDirState)) {
+     return `${get(serverAddressState)}/${get(servedFromReverseProxySubDirState)}/`
+@@ -125,14 +137,15 @@ export const serverAddressAndPortState = atom((get) => {
+       .replaceAll('//', '/')  // which puts extra double quotes.
+   }
+   if (get(servedFromReverseProxyState)) {
+-    return `${get(serverAddressState)}`
++    return `${get(serverAddressState)}${tosMountPrefix()}`
+       .replaceAll('"', '')
+   }
+ 
+   const sap = `${get(serverAddressState)}:${get(serverPortState)}`
+     .replaceAll('"', '')
+ 
+-  return sap.endsWith('/') ? sap.slice(0, -1) : sap
++  const clean = sap.endsWith('/') ? sap.slice(0, -1) : sap
++  return `${clean}${tosMountPrefix()}`
+ })
+ 
+ export const serverURL = atom((get) =>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt-dlp Web UI</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #101418; color: #d8dee6;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  }
+  .card { text-align: center; }
+  .mark {
+    width: 96px; height: 96px; margin: 0 auto 22px; border-radius: 22px;
+    background: linear-gradient(135deg, #1d2735 0%, #101418 100%);
+    box-shadow: 0 6px 30px rgba(255, 77, 79, .28);
+    position: relative;
+  }
+  .mark::before {
+    content: ""; position: absolute; left: 30px; top: 22px;
+    border-left: 30px solid #ff4d4f; border-top: 17px solid transparent;
+    border-bottom: 17px solid transparent;
+  }
+  .mark::after {
+    content: ""; position: absolute; left: 44px; top: 52px; width: 8px; height: 16px;
+    background: #f5f7fa;
+  }
+  a { color: #7fb2ff; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark"></div>
+    <p>正在打开 yt-dlp Web UI（版本 @@VERSION@@）…</p>
+    <p>若未自动跳转，请点击 <a href="/ytdlpwebui/">/ytdlpwebui/</a></p>
+  </div>
+  <script>location.replace('/ytdlpwebui/');</script>
+</body>
+</html>

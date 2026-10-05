@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt-dlp Web UI — Privacy Policy / 隐私政策</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#222}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:1.6rem;border-bottom:1px solid #ddd;padding-bottom:.3rem}
+.zh{background:#f7f7f9;padding:.8rem 1rem;border-radius:6px;font-size:.92rem}
+code{background:#f0f0f2;padding:.1rem .3rem;border-radius:3px;font-size:.9em}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;font-size:.92rem}
+</style>
+</head>
+<body>
+
+<h1>yt-dlp Web UI — Privacy Policy</h1>
+<p class="zh">本文档为双语隐私政策。英文版在前，中文版在后。（This document is bilingual: English first, Chinese below.）</p>
+
+<h2>1. Overview</h2>
+<p>yt-dlp Web UI is a self-hosted web interface for the yt-dlp downloader. It runs <strong>entirely on your own NAS device</strong> (TerraMaster TOS 7). The application itself does <strong>not collect, transmit or share any personal data</strong> with the publisher or any third party: there is no analytics, no telemetry, no tracking and no advertising.</p>
+
+<h2>2. Data stored on your device</h2>
+<table>
+<tr><th>Data</th><th>Location</th><th>Purpose</th></tr>
+<tr><td>Downloaded media files</td><td><code>/var/lib/ytdlpwebui/downloads</code> (or the directory you configure)</td><td>The content you asked to download</td></tr>
+<tr><td>Download queue / history database</td><td><code>/var/lib/ytdlpwebui/bolt.db</code></td><td>Local queue persistence so downloads survive restarts</td></tr>
+<tr><td>Application log</td><td><code>/var/lib/ytdlpwebui/yt-dlp-webui.log</code></td><td>Local troubleshooting</td></tr>
+<tr><td>App configuration</td><td><code>/usr/local/ytdlpwebui/config.yml</code>, <code>/usr/local/ytdlpwebui/ytdlpwebui.env</code></td><td>Listen address, port, paths, queue size</td></tr>
+<tr><td>Browser settings (theme, language, templates)</td><td>Your browser's local storage</td><td>UI preferences only; not sent to the server</td></tr>
+</table>
+<p>All of this data stays on your device. It is never uploaded to the publisher or to any intermediary.</p>
+
+<h2>3. Your rights: access, correction, deletion</h2>
+<ul>
+<li><strong>Access</strong>: the built-in file browser lists every downloaded file; the queue and history are shown in the web UI.</li>
+<li><strong>Correction</strong>: change settings in the web UI or edit the configuration files listed above, then restart the service.</li>
+<li><strong>Deletion</strong>: delete files in the web UI; <code>apt remove</code> (or App Center uninstall) keeps data, <code>apt purge</code> deletes <code>/var/lib/ytdlpwebui</code> entirely. No remote copy exists because nothing was ever uploaded.</li>
+</ul>
+
+<h2>4. Third-party network access (user-initiated only)</h2>
+<p>The application contacts external services <strong>only for the operations you explicitly perform</strong>:</p>
+<ul>
+<li><strong>Download sources</strong>: when you submit a video/playlist URL, yt-dlp on your NAS connects directly to that site to retrieve the media. The destination is the site you chose.</li>
+<li><strong>yt-dlp update check</strong>: only when you press the update button in the web UI, yt-dlp contacts its own release channel.</li>
+<li><strong>YouTube JavaScript challenge data</strong>: yt-dlp may fetch an auxiliary solver component from GitHub while processing a YouTube URL. This carries no personal data.</li>
+<li><strong>Nothing else</strong>: no data is sent to the publisher, no usage statistics phone home, no crash reporting exists.</li>
+</ul>
+
+<h2>5. Accounts and children</h2>
+<p>The application has no account system of its own: access is protected by your TerraMaster TOS login through the TOS web server. It serves your LAN and does not knowingly process children's data.</p>
+
+<h2>6. Changes and contact</h2>
+<p>This policy ships inside the application package (<code>/usr/local/ytdlpwebui/privacy-policy.html</code>, also served at <code>/ytdlpwebui/privacy-policy.html</code>). Questions or reports: <code>https://github.com/Moechz/yt-dlp-web-ui/issues</code>. Upstream project: <code>https://github.com/marcopiovanello/yt-dlp-web-ui</code> (GPL-3.0).</p>
+
+<hr>
+
+<h1>yt-dlp Web UI — 隐私政策（中文）</h1>
+
+<h2>1. 概述</h2>
+<p>yt-dlp Web UI 是 yt-dlp 下载器的自托管网页界面，<strong>完全运行在您自己的 NAS 设备</strong>（TerraMaster TOS 7）上。应用本身<strong>不向发布者或任何第三方收集、传输、共享任何个人数据</strong>：无统计、无遥测、无跟踪、无广告。</p>
+
+<h2>2. 存储在您设备上的数据</h2>
+<table>
+<tr><th>数据</th><th>位置</th><th>用途</th></tr>
+<tr><td>已下载的媒体文件</td><td><code>/var/lib/ytdlpwebui/downloads</code>（或您配置的目录）</td><td>您请求下载的内容</td></tr>
+<tr><td>下载队列 / 历史数据库</td><td><code>/var/lib/ytdlpwebui/bolt.db</code></td><td>本地队列持久化，重启后任务不丢失</td></tr>
+<tr><td>应用日志</td><td><code>/var/lib/ytdlpwebui/yt-dlp-webui.log</code></td><td>本地排障</td></tr>
+<tr><td>应用配置</td><td><code>/usr/local/ytdlpwebui/config.yml</code>、<code>/usr/local/ytdlpwebui/ytdlpwebui.env</code></td><td>监听地址、端口、路径、队列长度</td></tr>
+<tr><td>浏览器设置（主题、语言、模板）</td><td>您浏览器的本地存储</td><td>仅界面偏好，不会发送到服务器</td></tr>
+</table>
+<p>以上数据全部留在您的设备上，应用不会将其上传给发布者或任何中间方。</p>
+
+<h2>3. 您的权利：访问、更正、删除</h2>
+<ul>
+<li><strong>访问</strong>：内置文件浏览器可列出全部已下载文件；队列与历史记录在网页界面中展示。</li>
+<li><strong>更正</strong>：在网页界面修改设置，或编辑上述配置文件后重启服务。</li>
+<li><strong>删除</strong>：在网页界面删除文件；<code>apt remove</code>（或应用中心卸载）保留数据，<code>apt purge</code> 彻底删除 <code>/var/lib/ytdlpwebui</code>。因从未上传，任何远端都不存在副本。</li>
+</ul>
+
+<h2>4. 第三方网络访问（仅由您主动发起）</h2>
+<p>应用<strong>仅在您明确执行操作时</strong>访问外部服务：</p>
+<ul>
+<li><strong>下载源</strong>：当您提交视频/播放列表 URL 时，NAS 上的 yt-dlp 直接连接该站点获取媒体，目的地为您选择的站点。</li>
+<li><strong>yt-dlp 更新检查</strong>：仅当您在网页界面点击更新按钮时，yt-dlp 才会访问其官方发布渠道。</li>
+<li><strong>YouTube JavaScript 挑战数据</strong>：处理 YouTube 链接时，yt-dlp 可能从 GitHub 获取辅助求解组件，不含任何个人数据。</li>
+<li><strong>除此之外没有其他外联</strong>：不向发布者发送任何数据、无使用统计回连、无崩溃上报。</li>
+</ul>
+
+<h2>5. 账户与儿童</h2>
+<p>应用自身没有账号体系：访问由 TerraMaster TOS 登录经 TOS 网页服务统一鉴权。应用服务您的局域网，不涉及儿童数据的处理。</p>
+
+<h2>6. 变更与联系</h2>
+<p>本政策随应用包分发（<code>/usr/local/ytdlpwebui/privacy-policy.html</code>，亦经 <code>/ytdlpwebui/privacy-policy.html</code> 提供）。问题或报告请至 <code>https://github.com/Moechz/yt-dlp-web-ui/issues</code>。上游项目：<code>https://github.com/marcopiovanello/yt-dlp-web-ui</code>（GPL-3.0）。</p>
+</body>
+</html>

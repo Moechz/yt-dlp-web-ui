@@ -1,0 +1,51 @@
+[Unit]
+Description=yt-dlp Web UI (video download manager)
+Documentation=https://github.com/marcopiovanello/yt-dlp-web-ui/wiki
+After=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=ytdlpwebui
+Group=ytdlpwebui
+WorkingDirectory=/usr/local/ytdlpwebui
+# 用户可覆盖项（APP_* 环境变量 > config.yml > 内置默认值）；
+# 前缀 '-' 表示文件缺失也不致启动失败
+EnvironmentFile=-/usr/local/ytdlpwebui/ytdlpwebui.env
+# ExecStart 参数全部写死，绝无 $ 变量展开（systemd 只支持基本 ${VAR}，
+# 不支持 shell 风格默认值，曾致全环境 502）。
+# 监听安全双层兜底（删除任一层都不会端口外泄）：
+#   1) --conf 指向的 config.yml（回环 127.0.0.1:13033，随包分发）
+#   2) EnvironmentFile 中的活动默认值 APP_SERVER_HOST / APP_SERVER_PORT
+ExecStart=/usr/local/ytdlpwebui/bin/ytdlpwebui --conf /usr/local/ytdlpwebui/config.yml
+TimeoutStartSec=30
+TimeoutStopSec=10
+# 注意：按 TOS 规范不配置 Restart/RestartSec——生命周期由应用中心统一管理
+NoNewPrivileges=true
+# /usr /boot /efi 只读；下载目录可另设为共享卷路径（需在「应用用户」中授权）
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ytdlpwebui
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# 说明: 未启用 SystemCallFilter/MemoryDenyWriteExecute——
+# yt-dlp 需派生 python3/ffmpeg/qjs 子进程，过度收紧易误伤
+UMask=0027
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

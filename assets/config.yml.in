@@ -1,0 +1,37 @@
+# ============================================================
+# yt-dlp Web UI — TOS 默认配置（随包分发，升级会覆盖）
+#
+# 需要长期保留的用户级覆盖请写入 /usr/local/ytdlpwebui/ytdlpwebui.env
+# （APP_* 环境变量，优先级高于本文件），修改后执行：
+#     systemctl restart ytdlpwebui
+#
+# 监听安全双层兜底：本文件的 host/port 与 ytdlpwebui.env 的活动默认值
+# 互为保险——删除任一层都不会导致端口外泄。
+# ============================================================
+server:
+  # 仅监听本机回环；对外访问统一走 TOS nginx 的 /ytdlpwebui/ 路由
+  host: 127.0.0.1
+  port: 13033
+  # 并发下载数
+  queue_size: 2
+  # 保持为空：前端挂载在站点根，路径前缀由 nginx 剥离
+  base_url: ""
+
+paths:
+  # 下载文件保存目录（默认在数据目录内；可改为共享卷绝对路径，
+  # 但需在 TOS「共享文件夹 → 应用用户」中给 ytdlpwebui 用户授权）
+  download_path: /var/lib/ytdlpwebui/downloads
+  # yt-dlp 可执行文件（随包分发的官方 Python zipapp，由系统 python3 运行）
+  downloader_path: /usr/local/ytdlpwebui/bin/yt-dlp
+  # 队列数据库（bolt.db）所在目录
+  local_database_path: /var/lib/ytdlpwebui
+  # JS 运行时（yt-dlp 解 YouTube 签名挑战必需）：quickjs-ng 的 qjs
+  js_runtime_path: quickjs:/usr/local/ytdlpwebui/bin/qjs
+
+logging:
+  log_path: /var/lib/ytdlpwebui/yt-dlp-webui.log
+  enable_file_logging: true
+
+authentication:
+  # 由 TOS 网页服务（8181/5443）统一鉴权，无需应用内账号
+  require_auth: false

@@ -1,0 +1,36 @@
+#!/bin/bash
+# postrm - 删除/清除后处理（官方模板 + 本应用清理项）
+set -e
+
+MAINT_LOG=/var/log/ytdlpwebui-maint.log
+mkdir -p /var/log 2>/dev/null || true
+echo "$(date '+%F %T') postrm $*" >> "$MAINT_LOG" 2>/dev/null || true
+
+systemctl daemon-reload 2>/dev/null || true
+
+if [ "$1" = "purge" ]; then
+  # 队列数据库、下载文件、日志与配置（remove 时保留，purge 才全清）
+  rm -rf /var/lib/ytdlpwebui
+  # 系统层注册文件（postinst 兜底安装的）
+  rm -f /etc/systemd/system/ytdlpwebui.service
+  rm -f /etc/nginx/conf.d/ytdlpwebui.conf
+  # 安装期生成的降级 drop-in（只删本包生成的文件，绝不整目录删）
+  rm -f /etc/systemd/system/ytdlpwebui.service.d/80-ytdlpwebui-exec-compat.conf
+  rmdir --ignore-fail-on-non-empty /etc/systemd/system/ytdlpwebui.service.d 2>/dev/null || true
+  # 运行用户
+  if id -u ytdlpwebui > /dev/null 2>&1; then
+    userdel ytdlpwebui 2>/dev/null || true
+  fi
+  systemctl daemon-reload 2>/dev/null || true
+  # nginx 路由移除后重载生效
+  if command -v nginx > /dev/null 2>&1 && nginx -t > /dev/null 2>&1; then
+    nginx -s reload > /dev/null 2>&1 || true
+  fi
+  # 注：/var/log/ytdlpwebui-maint.log 保留（purge 取证用）
+  # 注：/usr/local/ytdlpwebui 由 dpkg 按包清单删除；postinst 派生的文件不在清单里
+  # （webui.bz2 解压物、首装复制的 env），此处补清以免目录残留/属主悬空
+  rm -f /usr/local/ytdlpwebui/index.html /usr/local/ytdlpwebui/ytdlpwebui.env
+  rmdir --ignore-fail-on-non-empty /usr/local/ytdlpwebui 2>/dev/null || true
+fi
+
+exit 0

@@ -1,0 +1,180 @@
+name: Build from source (TOS V6 audit chain)
+
+# V6 (review finding): a TOS deb must not ship binaries whose build cannot be
+# audited. This workflow builds EVERY executable payload of the package from
+# public source:
+#   * backend  : upstream yt-dlp-web-ui Go source at the requested tag, with the
+#                TOS sub-path patch applied, frontend built from source (pnpm)
+#   * qjs      : quickjs-ng C sources built with CMake
+# Audit chain: upstream source tag -> this workflow file -> public Actions logs
+#              -> release assets pinned by sha256 in config.env.
+#
+# Usage: run manually with the upstream tag (e.g. v4.0.0). Set release_tag to
+# attach the artifacts to a release (e.g. build-v4.0.0); leaving it empty keeps
+# them as workflow artifacts only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Upstream yt-dlp-web-ui tag to build (e.g. v4.0.0)'
+        required: true
+        default: 'v4.0.0'
+      quickjs_version:
+        description: 'quickjs-ng tag to build (e.g. v0.17.0)'
+        required: true
+        default: 'v0.17.0'
+      release_tag:
+        description: 'Attach artifacts to this release tag (e.g. build-v4.0.0); empty = artifact only'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build linux/${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      GOFLAGS: -trimpath
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout packaging repo (for the TOS patch)
+        uses: actions/checkout@v4
+        with:
+          path: pkg
+
+      - name: Checkout upstream source at ${{ inputs.tag }}
+        uses: actions/checkout@v4
+        with:
+          repository: marcopiovanello/yt-dlp-web-ui
+          ref: ${{ inputs.tag }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Apply TOS sub-path mount patch
+        run: |
+          git -C upstream apply "$GITHUB_WORKSPACE/pkg/patches/0001-tos-mount-prefix.patch"
+          git -C upstream diff --stat
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build frontend from source
+        working-directory: upstream/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          test -f dist/index.html
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Build backend (static Go binary)
+        working-directory: upstream
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          go mod download
+          go build -ldflags "-s -w" -o "$GITHUB_WORKSPACE/out/ytdlpwebui" .
+          file "$GITHUB_WORKSPACE/out/ytdlpwebui"
+
+      - name: Install CMake
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq cmake
+          fi
+
+      - name: Build quickjs-ng ${{ inputs.quickjs_version }} from source
+        run: |
+          curl -fL --retry 5 --retry-all-errors \
+            "https://github.com/quickjs-ng/quickjs/archive/refs/tags/${{ inputs.quickjs_version }}.tar.gz" \
+            -o qjs.tar.gz
+          mkdir -p qjs-src && tar xzf qjs.tar.gz -C qjs-src --strip-components=1
+          cmake -S qjs-src -B qjs-build -DCMAKE_BUILD_TYPE=Release -DQJS_BUILD_CLI_STATIC=ON \
+                -DQJS_BUILD_EXAMPLES=OFF -DQJS_ENABLE_INSTALL=OFF
+          cmake --build qjs-build --target qjs_exe -j"$(nproc)"
+          cp qjs-build/qjs "$GITHUB_WORKSPACE/out/qjs"
+          strip "$GITHUB_WORKSPACE/out/qjs" || true
+          file "$GITHUB_WORKSPACE/out/qjs"
+
+      - name: Smoke test
+        run: |
+          "$GITHUB_WORKSPACE/out/qjs" --version
+          go version -m "$GITHUB_WORKSPACE/out/ytdlpwebui"
+
+      - name: Package & checksums
+        run: |
+          cd "$GITHUB_WORKSPACE/out"
+          tar -czf "ytdlpwebui-linux-${{ matrix.goarch }}.tar.gz" ytdlpwebui
+          tar -czf "qjs-linux-${{ matrix.goarch }}.tar.gz" qjs
+          rm -f ytdlpwebui qjs
+          sha256sum *.tar.gz > "SHA256SUMS.${{ matrix.goarch }}"
+          cat "SHA256SUMS.${{ matrix.goarch }}"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.goarch }}
+          path: out/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: art
+          merge-multiple: true
+
+      - name: Combine checksums
+        run: |
+          cd art
+          cat SHA256SUMS.* > SHA256SUMS
+          rm -f SHA256SUMS.*
+          cat SHA256SUMS
+
+      - name: Attach to release ${{ inputs.release_tag }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: 'Source build of upstream ${{ inputs.tag }}'
+          prerelease: true
+          files: art/*
+          body: |
+            Binaries built **from public source** by
+            [.github/workflows/build-upstream.yml](https://github.com/Moechz/yt-dlp-web-ui/blob/main/.github/workflows/build-upstream.yml)
+            for the TOS package (V6 audit chain).
+
+            | Asset | Source |
+            |---|---|
+            | `ytdlpwebui-linux-*.tar.gz` | upstream `marcopiovanello/yt-dlp-web-ui` `${{ inputs.tag }}` + TOS sub-path patch, frontend built from source (pnpm) |
+            | `qjs-linux-*.tar.gz` | `quickjs-ng/quickjs` `${{ inputs.quickjs_version }}`, built with CMake |
+
+            Audit chain: upstream source tag -> public workflow file -> public
+            Actions run ${{ github.run_id }} -> `SHA256SUMS` below. The deb's
+            `config.env` pins these hashes a second time.
