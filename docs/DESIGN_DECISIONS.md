@@ -235,3 +235,25 @@ sh -c 'echo "tos-1297 ytdlpweb-1297 rwxlta" | /usr/sbin/spcackload'
 
 **附带记录（环境，非包问题）**：代理配在 `/etc/profile.d/*.sh` 对 systemd 服务无效，
 必须写进服务的 EnvironmentFile——见 D-015 与打包指南坑 11c。
+
+## D-017：单元必须引用 TOS 系统环境 `/etc/systemd/tos_env.conf`（系统代理由此下发）
+
+**背景（2026-10-06 真机）**：用户用 TOS 控制面板配了代理，但应用建任务仍然超时。
+逐层排查后定位：控制面板代理同时写 `/etc/systemd/tos_env.conf`
+（`HTTP_PROXY/HTTPS_PROXY/FTP_PROXY`）与 `/etc/profile.d/profile_extend.sh`；
+TOS 自己的服务（`application`/`TOSDaemon`/`clouddisk`/`filemanage`）都以
+`EnvironmentFile=-/etc/systemd/tos_env.conf` 读它，而**第三方应用单元一律没有引用**
+（实测 8 个已装应用引用次数全为 0），官方 deb/服务规范也从未提及。
+
+**Decision**：`assets/init.d/ytdlpwebui.service` 增加
+`EnvironmentFile=-/etc/systemd/tos_env.conf`，位置在自有 `ytdlpwebui.env` **之前**
+（systemd 后读覆盖先读 → 系统代理自动生效、自有 env 仍可单应用覆盖）。
+随包 `ytdlpwebui.env` 的代理段保留为「显式覆盖」用途，并注明系统代理来自 `tos_env.conf`。
+
+**真机验证**：删掉手工写在 `ytdlpwebui.env` 的代理行后重装，`/proc/<pid>/environ`
+仍可见三（大写）proxy 变量（来源即 `tos_env.conf`），gateway 200、YouTube 端到端可用。
+
+**同步动作**：已把该坑写进打包指南**坑 11e**（并标明「存量已封项目同样中招，需回灌单元模板」），
+另向 TerraMaster 提交平台侧报告
+（`.tdp/TOS-AppCenter-system-proxy-not-passed-to-apps.md`，建议平台为应用单元注入受管 drop-in
+或 `DefaultEnvironment` 全局下发，并把这些写进官方规范）。

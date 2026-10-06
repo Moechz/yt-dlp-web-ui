@@ -10,6 +10,12 @@ Type=simple
 User=ytdlpwebui
 Group=ytdlpwebui
 WorkingDirectory=/usr/local/ytdlpwebui
+# TOS 系统级环境：平台「控制面板 → 网络 → 代理」写入 /etc/systemd/tos_env.conf
+# （HTTP_PROXY / HTTPS_PROXY / FTP_PROXY）。TOS 自己的服务（application/TOSDaemon/
+# clouddisk/filemanage）都用 EnvironmentFile 引用它，**应用单元必须同样引用**，
+# 否则本服务及其派生的子进程（yt-dlp 等）拿不到系统代理，会导致「能装不能用」。
+# 放在自有 env 之前 —— systemd 后读的覆盖先读的，因此自有 env 仍可单应用覆盖。
+EnvironmentFile=-/etc/systemd/tos_env.conf
 # 用户可覆盖项（APP_* 环境变量 > config.yml > 内置默认值）；
 # 前缀 '-' 表示文件缺失也不致启动失败
 EnvironmentFile=-/usr/local/ytdlpwebui/ytdlpwebui.env
