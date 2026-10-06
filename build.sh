@@ -155,6 +155,64 @@ for p in sys.argv[1:]:
 PYEOF
 }
 
+# ================================================================
+# P1(A)：给随包 yt-dlp zipapp 打一行**可复现**补丁
+#
+#   yt-dlp 在 Python <= 3.11 上每次实例化 YoutubeDL 都会往 stderr 打：
+#     Deprecated Feature: Support for Python version 3.10 has been deprecated…
+#   （`yt_dlp/update.py:_get_system_deprecation()`，上游用 to_stderr(force=True)
+#    输出，`--no-warnings`/`--quiet` 均无法抑制——已真机实测。）
+#   TOS 应用把子进程 stderr **全文**当错误文案返回（metadata/fetchers.go），
+#   这句警告因此顶在真错误前面并把日志刷红。
+#
+#   补丁：`_get_system_deprecation()` 直接 `return None`（等价于 Python>3.11 时
+#   上游自己的行为）。zipapp 是纯 `.py`，补丁**不引入任何 ELF**（V6 中性）；
+#   上游原件 sha256 已在 fetch 阶段校验，补丁内容与原因记入 PROVENANCE.md。
+# ================================================================
+patch_ytdlp_zipapp() { # patch_ytdlp_zipapp <in.zipapp> <out.zipapp>
+  python3 - "$1" "$2" <<'PYPATCH'
+import io, sys, zipfile
+
+src, dst = sys.argv[1], sys.argv[2]
+TARGET = "yt_dlp/update.py"
+ANCHOR = "def _get_system_deprecation():\n"
+INJECT = (
+    "def _get_system_deprecation():\n"
+    "    # TOS patch (Moechz/yt-dlp-web-ui): upstream forces this notice to stderr on\n"
+    "    # every YoutubeDL instantiation when Python <= 3.11 and it cannot be\n"
+    "    # suppressed with --no-warnings/--quiet. The TOS app returns the whole\n"
+    "    # stderr as its error message, so the notice masked real failures.\n"
+    "    # Returning None is exactly what upstream does for Python > 3.11.\n"
+    "    return None\n"
+)
+
+raw = open(src, "rb").read()
+shebang = b""
+if raw.startswith(b"#!"):
+    shebang = raw[: raw.find(b"\n") + 1]
+
+with zipfile.ZipFile(io.BytesIO(raw)) as zin:
+    if TARGET not in zin.namelist():
+        sys.exit(f"patch: {TARGET} not found")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == TARGET:
+                text = data.decode("utf-8")
+                if ANCHOR not in text:
+                    sys.exit("patch: anchor not found (upstream layout changed?)")
+                if "return None\n    MIN_SUPPORTED" in text:
+                    sys.exit("patch: already applied")
+                data = text.replace(ANCHOR, INJECT, 1).encode("utf-8")
+            # 保留原 ZipInfo（时间戳/属性）→ 输出确定性
+            zout.writestr(info, data)
+
+open(dst, "wb").write(shebang + buf.getvalue())
+print("yt-dlp zipapp patched: _get_system_deprecation() -> None")
+PYPATCH
+}
+
 # ============================================================
 # 阶段: fetch
 # ============================================================
@@ -242,9 +300,10 @@ stage_stage() {
   fi
   chmod 0755 "$APP/bin/qjs"
 
-  # --- 3. yt-dlp zipapp ---
-  log "  + bin/yt-dlp（$YTDLP_VERSION，Python zipapp）"
-  cp "$DL_DIR/yt-dlp.zipapp" "$APP/bin/yt-dlp"
+  # --- 3. yt-dlp zipapp（+ P1(A) 补丁：静默 Python 版本弃用提示） ---
+  log "  + bin/yt-dlp（$YTDLP_VERSION，Python zipapp + TOS 补丁）"
+  patch_ytdlp_zipapp "$DL_DIR/yt-dlp.zipapp" "$BUILD_DIR/yt-dlp.zipapp.patched"
+  cp "$BUILD_DIR/yt-dlp.zipapp.patched" "$APP/bin/yt-dlp"
   chmod 0755 "$APP/bin/yt-dlp"
 
   # --- 4. config.ini（严格 JSON；@@...@@ 占位符渲染） ---
@@ -595,6 +654,34 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         print("bin/yt-dlp 缺少 __main__.py", file=sys.stderr)
         sys.exit(1)
 PYZ
+
+  log "校验 yt-dlp 补丁（P1(A)：Python 版本弃用提示已静默）..."
+  python3 - "$APP/bin/yt-dlp" <<'PYP' || fail=1
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    t = z.read("yt_dlp/update.py").decode("utf-8")
+i = t.find("def _get_system_deprecation():")
+if i < 0:
+    print("    patch: 包内找不到 _get_system_deprecation()", file=sys.stderr)
+    sys.exit(1)
+if "return None" not in t[i:i + 1500]:
+    print("    patch: 未注入 return None", file=sys.stderr)
+    sys.exit(1)
+PYP
+  if command -v python3 >/dev/null 2>&1; then
+    # 离线触发：--simulate 一个必然连不上的 URL 也会实例化 YoutubeDL，
+    # 从而走到 _get_system_deprecation()（补丁前 stderr 必出现该警告）
+    if python3 "$APP/bin/yt-dlp" --simulate "http://127.0.0.1:1/x" \
+         >/dev/null 2>"$BUILD_DIR/ytdlp-stderr.txt"; then :; fi
+    if grep -q "Deprecated Feature" "$BUILD_DIR/ytdlp-stderr.txt"; then
+      warn "yt-dlp 补丁未生效：stderr 仍出现 'Deprecated Feature'"
+      fail=1
+    else
+      log "  ok 补丁生效（--simulate 实测 stderr 无 Deprecated Feature）"
+    fi
+  else
+    warn "本机无 python3，无法运行期验证 yt-dlp 补丁"; fail=1
+  fi
 
   log "S8 零在线安装自检（deb 脚本不得出现 pip/curl/apt install 等）..."
   local sc

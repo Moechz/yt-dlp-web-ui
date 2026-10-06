@@ -200,3 +200,38 @@ sh -c 'echo "tos-1297 ytdlpweb-1297 rwxlta" | /usr/sbin/spcackload'
   `WARNING: [youtube] No supported JavaScript runtime could be found…`，
   部分格式可能缺失。修法：构建期给 `metadata.DefaultFetcher` 补 `--js-runtimes`
   （自研补丁，需随 PROVENANCE 记录）。
+
+## D-016：P1 选「补丁 zipapp」而非「随包 CPython」；P2 给取元数据补 JS 运行时
+
+**P1（消除 Python 3.10 弃用警告）→ 方案 A：构建期给随包 yt-dlp zipapp 打一行可复现补丁。**
+
+- 现象：TOS 系统 Python 3.10 → yt-dlp **每次实例化 `YoutubeDL`** 都往 stderr 打
+  `Deprecated Feature: Support for Python version 3.10 has been deprecated…`
+  （`yt_dlp/update.py:_get_system_deprecation()`，上游 `to_stderr(force=True)`，
+  `--no-warnings`/`--quiet` 压不掉，真机实测）。应用把子进程 stderr **全文**当错误文案
+  返回（`metadata/fetchers.go`），该警告因此顶在真错误前、日志每次一条红。
+- 补丁：`build.sh: patch_ytdlp_zipapp()` 把 `_get_system_deprecation()` 首行改为
+  `return None`（等价于上游在 Python>3.11 时的行为）。保留原 zip 条目元数据 → 输出确定。
+- **为何不选方案 B（随包 CPython）**：B 会给 deb 增加 50+ 个 ELF（python3/libpython/
+  各 stdlib 扩展 .so），**直接命中 V6**（判据是"源码+配方位级可复现"，不是"供应链可信"；
+  metube 全源码 CI 后仍被列 V6，alist 整改后仍是 On Hold+仅剩 V6）。
+  而 zipapp 是纯 `.py`，打补丁**不引入任何 ELF → V6 中性**，用户可见效果与 B 相同。
+- 门禁：`verify` 断言包内 `update.py` 含注入的 `return None`，并**离线实测**
+  （`python3 bin/yt-dlp --simulate http://127.0.0.1:1/x` → stderr 不得出现
+  `Deprecated Feature`；该路径会实例化 YoutubeDL，故必触发）。上游原件 sha256 仍在
+  fetch 阶段按 pin 校验；补丁与原因记入 `PROVENANCE.md` §1.5。
+
+**P2 → 构建期补丁 `patches/0002-metadata-js-runtimes.patch`。**
+
+- 现象：上游取元数据命令是 `yt-dlp <url> -J`，**没传** `--js-runtimes`（只有下载那条传）
+  → 日志出现 `WARNING: [youtube] No supported JavaScript runtime could be found…`，
+  部分格式可能缺失。
+- 补丁：`metadata.DefaultFetcher` 读 `Paths.JSRuntimePath` 并追加 `--js-runtimes <path>`。
+- CI 构建期断言：`grep -q 'Paths.JSRuntimePath' server/internal/metadata/fetchers.go`。
+
+**真机验证（tnas-57）**：新包安装后新建 YouTube 任务 → 新增日志里
+`Deprecated Feature` / `No supported JavaScript runtime` / `yt-dlp process error` 均为 **0 次**；
+此前的 YouTube 任务已完成（`.webm`，203 MB）。
+
+**附带记录（环境，非包问题）**：代理配在 `/etc/profile.d/*.sh` 对 systemd 服务无效，
+必须写进服务的 EnvironmentFile——见 D-015 与打包指南坑 11c。

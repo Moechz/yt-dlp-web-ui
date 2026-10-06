@@ -61,10 +61,16 @@ jobs:
           path: upstream
           persist-credentials: false
 
-      - name: Apply TOS sub-path mount patch
+      - name: Apply TOS patches (sub-path mount + metadata JS runtime)
         run: |
-          git -C upstream apply "$GITHUB_WORKSPACE/pkg/patches/0001-tos-mount-prefix.patch"
+          for p in "$GITHUB_WORKSPACE"/pkg/patches/0*.patch; do
+            echo "applying $(basename "$p")"
+            git -C upstream apply "$p"
+          done
           git -C upstream diff --stat
+          # build-time assertions that both patches landed
+          grep -q 'tosMountPrefix' upstream/frontend/src/atoms/settings.ts
+          grep -q 'Paths.JSRuntimePath' upstream/server/internal/metadata/fetchers.go
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

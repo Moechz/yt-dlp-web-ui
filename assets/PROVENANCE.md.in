@@ -11,8 +11,19 @@ Package version: **@@VERSION@@** ｜ Build mode: **@@BUILD_MODE@@** ｜ Target a
 | 路径 | 组件 | 版本 | 来源 / 构建方式 |
 |---|---|---|---|
 | `bin/ytdlpwebui` | 后端（Go + 内嵌前端） | @@UPSTREAM_VERSION@@ | 上游 `marcopiovanello/yt-dlp-web-ui` 源码 tag `v@@UPSTREAM_VERSION@@`；`source` 模式由 `.github/workflows/build-upstream.yml` 在 ubuntu runner 上 `pnpm build`（前端）+ `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w"` 静态构建；`compat` 模式直接取上游官方 Release 资产（不可提交商店） |
-| `bin/yt-dlp` | yt-dlp 下载器 | @@YTDLP_VERSION@@ | yt-dlp 官方 Release 的 **Python zipapp**（`yt-dlp` 资产，纯 `.py` 源码 + `yt_dlp_ejs`，非 ELF、可审计）；由 TOS 系统 `/usr/bin/python3` 运行（`Depends: python3`）。sha256 pin 在 `config.env` |
+| `bin/yt-dlp` | yt-dlp 下载器 | @@YTDLP_VERSION@@ | yt-dlp 官方 Release 的 **Python zipapp**（`yt-dlp` 资产，纯 `.py` 源码 + `yt_dlp_ejs`，非 ELF、可审计）；由 TOS 系统 `/usr/bin/python3` 运行（`Depends: python3`）。sha256 pin 在 `config.env`。**含 1 处可复现补丁**，见下节 P1 |
 | `bin/qjs` | quickjs-ng JS 运行时 | @@QUICKJS_VERSION@@ | `source` 模式由 CI 从 `quickjs-ng/quickjs` 源码 tag `@@QUICKJS_VERSION@@` 用 CMake 构建（`cmake --build build --target qjs_exe`）并 strip；`compat` 模式取官方 release 二进制。sha256 pin 在 `config.env` |
+
+## 1.5 对上游源码/载荷的补丁（全部公开、可复现、不引入任何 ELF）
+
+| 编号 | 目标 | 文件 | 内容 | 原因 |
+|---|---|---|---|---|
+| P0 | 前端 | `patches/0001-tos-mount-prefix.patch` | `serverAddressAndPortState` 从 `window.location.pathname` 推导挂载前缀 | 上游前端把 API/WS 地址写死为 `hostname:port`，TOS 子路径路由下会 404 |
+| P2 | 后端 | `patches/0002-metadata-js-runtimes.patch` | 取元数据的 `yt-dlp <url> -J` 补上 `--js-runtimes <path>` | 上游只在下载时传 JS 运行时 → 取元数据报 `No supported JavaScript runtime` 且可能缺格式 |
+| P1 | 随包 zipapp | `build.sh: patch_ytdlp_zipapp()` | `yt_dlp/update.py` 的 `_get_system_deprecation()` 直接 `return None` | TOS 系统 Python 3.10 → yt-dlp 每次实例化 `YoutubeDL` 都往 **stderr** 打 `Deprecated Feature: Support for Python version 3.10…`（上游 `to_stderr(force=True)`，`--no-warnings/--quiet` 压不掉）。应用把 stderr 全文当错误文案返回，该警告会盖住真错误。`return None` 等价于上游在 Python>3.11 时的行为 |
+
+P1 的上游原件 sha256 已在 `fetch` 阶段按 `config.env` 的 pin 校验；补丁仅改写一个纯 Python 文件的字节，
+构建期 `verify` 会实测断言（`--simulate` + stderr 无 `Deprecated Feature`）。
 
 ## 2. 不随包分发的系统依赖
 

@@ -27,6 +27,9 @@
 - 构建：`source`（本仓库公开 CI 从源码构建，可提交）/ `compat`（本地迭代，禁止提交）双模式；
   fetch 阶段 sha256 双层校验（CI SHA256SUMS + config.env pin）。
 - 文档：`AGENTS.md` / `HANDOFF.md` / `docs/{TASK_STATE,DESIGN_DECISIONS,SOURCE-AUDIT,CHANGELOG}.md`。
+- 补丁（全部公开、可复现、不引入 ELF）：P0 前端子路径前缀；P1 随包 yt-dlp zipapp 静默
+  Python 3.10 弃用提示（`_get_system_deprecation()` → `return None`）；P2 取元数据补
+  `--js-runtimes`（YouTube 格式更完整）。
 - 真机验证（TOS 7 / x86_64）：`apt install` 后服务 active+enabled、仅监听回环、
   TOS 网关路由（301→5443 后 200）、WebSocket 101、经 RPC 真实下载文件成功、升级保数据、
   `apt remove` 保数据 / `apt purge` 全清；修复 `index.html` 解压后属主未归一的问题。

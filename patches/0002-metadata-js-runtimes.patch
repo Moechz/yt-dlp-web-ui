@@ -1,0 +1,22 @@
+diff --git a/server/internal/metadata/fetchers.go b/server/internal/metadata/fetchers.go
+index 90b4fd3..7f6bfae 100644
+--- a/server/internal/metadata/fetchers.go
++++ b/server/internal/metadata/fetchers.go
+@@ -15,7 +15,16 @@ import (
+ )
+ 
+ func DefaultFetcher(url string) (*common.DownloadMetadata, error) {
+-	cmd := exec.Command(config.Instance().Paths.DownloaderPath, url, "-J")
++	// TOS patch (Moechz/yt-dlp-web-ui): the metadata pass must enable the same
++	// JavaScript runtime as the download pass. Upstream only passes --js-runtimes
++	// when downloading, so the metadata pass falls back to yt-dlp's default
++	// (deno), which is not installed -> "WARNING: [youtube] No supported
++	// JavaScript runtime could be found ... some formats may be missing".
++	args := []string{url, "-J"}
++	if js := config.Instance().Paths.JSRuntimePath; js != "" {
++		args = append(args, "--js-runtimes", js)
++	}
++	cmd := exec.Command(config.Instance().Paths.DownloaderPath, args...)
+ 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+ 
+ 	stdout, err := cmd.StdoutPipe()
