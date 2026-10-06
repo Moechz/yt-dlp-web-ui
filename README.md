@@ -58,7 +58,9 @@ apt install -y /tmp/ytdlpwebui.deb     # 会自动装齐 python3 / ffmpeg
 常用覆盖项（修改后 `systemctl restart ytdlpwebui`）：
 
 ```ini
-# 下载目录（默认 /var/lib/ytdlpwebui/downloads；改为共享卷前先给应用用户授权）
+# 下载目录：默认是应用专属共享文件夹 /<卷>/ytdlpwebui（安装时用官方 ter_share_add 创建，
+# 文件管理器/SMB 直接可见、且在数据卷上）。改到别处需先给应用用户授权。
+# ⚠️ 不要留在系统分区（/var/lib/... 只有几 GB，会被下载写满）
 APP_PATHS_DOWNLOAD_PATH=/Volume1/media/downloads
 # 并发下载数
 APP_SERVER_QUEUE_SIZE=2

@@ -257,3 +257,38 @@ TOS 自己的服务（`application`/`TOSDaemon`/`clouddisk`/`filemanage`）都�
 另向 TerraMaster 提交平台侧报告
 （`.tdp/TOS-AppCenter-system-proxy-not-passed-to-apps.md`，建议平台为应用单元注入受管 drop-in
 或 `DefaultEnvironment` 全局下发，并把这些写进官方规范）。
+
+## D-018：下载目录改为数据卷共享文件夹（`ter_share_add`），修正 D-011
+
+**背景（2026-10-06 真机实测）**：D-011 把默认下载目录设为 `/var/lib/ytdlpwebui/downloads`，
+而该路径**在系统分区上**——实测本机 `/` = `/dev/md9` 仅 **7.5 GB 总 / 2.0 GB 可用**，
+下载两部视频就吃掉 256 MB。根分区写满会连带拖垮系统服务/数据库/日志，后果远超"下不了"。
+
+同时发现**官方 best-practices 明确规定了布局**（本地镜像
+`hermes-agent-webui/docs/official/best-practices.txt`）：
+
+- 应用运行时数据 → `/Volume*/@apps/<appid>/data/`（数据卷）
+- **用户业务数据 → 共享文件夹 `/Volume*/<appid>/`**，postinst 里用
+  **`ter_share_add -name <appid> -owner <appid>`** 创建（可 `ln -s` 到 `data/`）
+- "Deb Applications: Runtime data is stored in /Volume*/@apps/<appid>/data/"
+
+而我们此前既没落数据卷、也没建共享夹——**违反规范**，这也是用户在 TOS 文件管理器里
+找不到下载文件的原因（`/var/lib` 不在共享夹命名空间内）。
+
+**Decision**：下载目录 = **数据卷上的共享文件夹 `/<Volume N>/<appid>`**（下载的视频是用户数据）：
+
+1. postinst 由平台镜像 `/Volume*/@apps/<appid>` 反推卷号（逐机不同），
+   调官方 `ter_share_add -device <卷> -name <appid> -owner <appid>` 创建共享夹；
+   工具缺失/失败则 `mkdir` 兜底（仍在数据卷）；再不行才回落系统分区私有目录**并醒目告警**。
+2. 实际路径由 postinst 写进 `ytdlpwebui.env` 的 `APP_PATHS_DOWNLOAD_PATH`（env > config.yml）；
+   `config.yml` 保留 `/var/lib/...` 仅作"env 被误删"的兜底。
+3. **升级迁移**：若 env 里仍是旧默认值 `/var/lib/ytdlpwebui/downloads`（说明用户没自定义），
+   则切到共享夹并把已有文件 `mv` 过去；**迁移失败则保持原目录并告警**（绝不让文件变得看不见）。
+4. **purge 不删共享夹**（用户数据），只打印位置提示。
+5. 23 语 `important` / `release_note` 已写明新下载目录；postinst 输出实际路径。
+6. verify 新增门禁：postinst 必须含 `ter_share_add` / env 落值 / 系统分区告警，lang 必须写明共享夹，
+   postrm 必须声明不删共享夹。
+
+**真机验证（tnas-57）**：首装即建 `/Volume1/ytdlpwebui`（属主 ytdlpwebui），
+env 落值 `/Volume1/ytdlpwebui`，3 个已有文件迁移成功，系统分区可用 2.0G→2.2G，
+服务 active、gateway 200，新建任务 `sample-10s.mp4` 正确落到共享夹。

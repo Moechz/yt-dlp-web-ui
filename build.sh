@@ -683,6 +683,18 @@ PYP
     warn "本机无 python3，无法运行期验证 yt-dlp 补丁"; fail=1
   fi
 
+  log "校验下载目录设计（官方 best-practices：用户数据放数据卷共享夹）..."
+  grep -q 'ter_share_add -device' "$ASSETS_DIR/postinst" \
+    || { warn "postinst 必须用官方 ter_share_add 创建共享文件夹"; fail=1; }
+  grep -q 'APP_PATHS_DOWNLOAD_PATH=' "$ASSETS_DIR/postinst" \
+    || { warn "postinst 必须把实际下载目录写进 env"; fail=1; }
+  grep -q '位于系统分区' "$ASSETS_DIR/postinst" \
+    || { warn "postinst 缺「下载目录落系统分区」告警"; fail=1; }
+  grep -q '/Volume<N>/ytdlpwebui' "$APP/$APP_ID.lang" \
+    || { warn "lang 必须写明下载目录（共享夹 /Volume<N>/ytdlpwebui）"; fail=1; }
+  grep -q '下载共享文件夹' "$ASSETS_DIR/postrm" \
+    || { warn "postrm 必须声明 purge 不删下载共享夹"; fail=1; }
+
   log "S8 零在线安装自检（deb 脚本不得出现 pip/curl/apt install 等）..."
   local sc
   for sc in "$ASSETS_DIR/preinst" "$ASSETS_DIR/postinst" "$ASSETS_DIR/prerm" "$ASSETS_DIR/postrm"; do

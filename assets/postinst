@@ -8,12 +8,19 @@
 set -e
 
 APP_DIR=/usr/local/ytdlpwebui
+APP_ID=ytdlpwebui
 APP_USER=ytdlpwebui
 DATA_DIR=/var/lib/ytdlpwebui
 MAINT_LOG=/var/log/ytdlpwebui-maint.log
 UNIT=ytdlpwebui.service
 DROPIN_DIR=/etc/systemd/system/${UNIT}.d
 DROPIN_COMPAT=80-ytdlpwebui-exec-compat.conf
+# 旧默认下载目录（系统分区上的私有目录）。官方 best-practices 规定：
+#   应用运行时数据 → /Volume*/@apps/<appid>/data/（数据卷）
+#   用户业务数据   → 共享文件夹 /Volume*/<appid>/（用 ter_share_add 创建，文件管理器/SMB 可见）
+# 下载的视频属于用户业务数据，所以默认放数据卷共享夹；
+# 根分区通常仅几 GB，放 /var/lib 会被写满并拖垮整机。
+OLD_DEFAULT_DL=/var/lib/ytdlpwebui/downloads
 
 pkg_log() {
   mkdir -p /var/log 2>/dev/null || true
@@ -40,16 +47,97 @@ case "$1" in
       chown -R $APP_USER:$APP_USER "$APP_DIR" 2>/dev/null || true
     fi
 
-    # 4. 环境变量文件首装引导：仅在不存在时从随包模板复制（升级永不覆盖用户配置，
-    #    conffile 交互提示会卡死商店安装——坑 2）
-    if [ ! -e "$APP_DIR/ytdlpwebui.env" ] && [ -e "$APP_DIR/ytdlpwebui.env.example" ]; then
-      install -m 0640 -o $APP_USER -g $APP_USER \
-        "$APP_DIR/ytdlpwebui.env.example" "$APP_DIR/ytdlpwebui.env"
-      pkg_log postinst bootstrap "ytdlpwebui.env 首装"
+    # 4. 下载目录 = 数据卷上的共享文件夹 /Volume<N>/<appid>
+    #    卷号逐机不同（应用可能装在 Volume1/Volume2…），由平台镜像
+    #    /Volume<N>/@apps/<appid> 反推；用官方 ter_share_add 建共享夹（属主=应用用户），
+    #    工具缺失/失败时退化为 mkdir（仍在数据卷）；再不行才回落系统分区私有目录。
+    APP_VOL=""
+    for d in /Volume*/@apps/$APP_ID; do
+      [ -d "$d" ] || continue
+      APP_VOL=$(basename "$(dirname "$(dirname "$d")")")
+      break
+    done
+    if [ -z "$APP_VOL" ]; then
+      for d in /Volume*; do
+        if [ -d "$d" ]; then APP_VOL=$(basename "$d"); break; fi
+      done
+    fi
+    SHARE_DIR=""
+    if [ -n "$APP_VOL" ]; then
+      SHARE_DIR="/$APP_VOL/$APP_ID"
+      if [ ! -d "$SHARE_DIR" ] && command -v ter_share_add > /dev/null 2>&1; then
+        ter_share_add -device "$APP_VOL" -name "$APP_ID" -owner "$APP_USER" > /dev/null 2>&1 || true
+        pkg_log postinst "ter_share_add -device $APP_VOL -name $APP_ID -owner $APP_USER"
+      fi
+      if [ ! -d "$SHARE_DIR" ]; then
+        mkdir -p "$SHARE_DIR" 2>/dev/null || true
+        pkg_log postinst "ter_share_add 不可用/失败，已退化 mkdir $SHARE_DIR"
+      fi
+      if [ -d "$SHARE_DIR" ]; then
+        chown $APP_USER:$APP_USER "$SHARE_DIR" 2>/dev/null || true
+      else
+        SHARE_DIR=""
+      fi
+    fi
+    # 只有「应用用户确实可写」才用它，否则回落（避免首启就写失败）
+    APP_CAN_WRITE=0
+    if [ -n "$SHARE_DIR" ]; then
+      if command -v runuser > /dev/null 2>&1; then
+        if runuser -u "$APP_USER" -- test -w "$SHARE_DIR" 2>/dev/null; then APP_CAN_WRITE=1; fi
+      else
+        if su -s /bin/sh -c "test -w '$SHARE_DIR'" "$APP_USER" 2>/dev/null; then APP_CAN_WRITE=1; fi
+      fi
+    fi
+    if [ "$APP_CAN_WRITE" = "1" ]; then
+      DL_DIR="$SHARE_DIR"
+    else
+      DL_DIR="$OLD_DEFAULT_DL"
+      [ -z "$SHARE_DIR" ] || pkg_log postinst "警告: 应用用户对 $SHARE_DIR 不可写，回落 $DL_DIR"
     fi
 
-    # 5. 数据目录（队列数据库 / 下载文件 / 日志）
-    install -d -o $APP_USER -g $APP_USER -m 0750 "$DATA_DIR" "$DATA_DIR/downloads"
+    # 5. 环境变量文件 + 下载路径落值
+    #    首装从随包模板复制（升级永不覆盖用户配置——坑 2）；
+    #    若 env 里仍是旧默认值（系统分区私有目录）→ 改成共享夹，并把已有文件迁移过去
+    if [ ! -e "$APP_DIR/$APP_ID.env" ] && [ -e "$APP_DIR/$APP_ID.env.example" ]; then
+      install -m 0640 -o $APP_USER -g $APP_USER \
+        "$APP_DIR/$APP_ID.env.example" "$APP_DIR/$APP_ID.env"
+      pkg_log postinst bootstrap "$APP_ID.env 首装"
+    fi
+    CUR_DL=$(grep -E '^APP_PATHS_DOWNLOAD_PATH=' "$APP_DIR/$APP_ID.env" 2>/dev/null | tail -1 | cut -d= -f2-)
+    if [ "$CUR_DL" = "$OLD_DEFAULT_DL" ] && [ "$DL_DIR" != "$OLD_DEFAULT_DL" ]; then
+      install -d -o $APP_USER -g $APP_USER -m 0750 "$DL_DIR"
+      if [ -d "$OLD_DEFAULT_DL" ]; then
+        n=$(find "$OLD_DEFAULT_DL" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+        if [ "${n:-0}" -gt 0 ]; then
+          if mv -f "$OLD_DEFAULT_DL"/* "$DL_DIR"/ 2>/dev/null; then
+            pkg_log postinst "已迁移 $n 个已有下载文件: $OLD_DEFAULT_DL -> $DL_DIR"
+          else
+            pkg_log postinst "迁移失败，下载目录保持 $OLD_DEFAULT_DL"
+            echo "警告: 已有下载文件未能迁移，下载目录保持 $OLD_DEFAULT_DL（系统分区！）" >&2
+            DL_DIR="$OLD_DEFAULT_DL"
+          fi
+        fi
+      fi
+      sed -i "s#^APP_PATHS_DOWNLOAD_PATH=.*#APP_PATHS_DOWNLOAD_PATH=$DL_DIR#" "$APP_DIR/$APP_ID.env"
+      chown $APP_USER:$APP_USER "$APP_DIR/$APP_ID.env" 2>/dev/null || true
+      pkg_log postinst "下载目录已设为 $DL_DIR"
+    fi
+
+    # 6. 数据目录（队列数据库/日志；下载文件在 $DL_DIR）
+    install -d -o $APP_USER -g $APP_USER -m 0750 "$DATA_DIR" "$OLD_DEFAULT_DL"
+
+    # 6b. 系统分区安全闸：下载目录若落在根文件系统上，醒目告警
+    if [ -d "$DL_DIR" ]; then
+      DL_FS=$(df -P "$DL_DIR" 2>/dev/null | awk 'NR==2{print $6}')
+      ROOT_FS=$(df -P / 2>/dev/null | awk 'NR==2{print $6}')
+      if [ -n "$DL_FS" ] && [ "$DL_FS" = "$ROOT_FS" ]; then
+        echo "警告: 下载目录 $DL_DIR 位于系统分区（$(df -h / | awk 'NR==2{print $2" 总 / "$4" 可用"}')）！" >&2
+        echo "      大量下载会写满系统分区并影响整机。建议：TOS 控制面板给应用用户 $APP_USER" >&2
+        echo "      授权一个共享文件夹，再把 $APP_DIR/$APP_ID.env 的" >&2
+        echo "      APP_PATHS_DOWNLOAD_PATH 指过去后 systemctl restart ytdlpwebui。" >&2
+        pkg_log postinst "警告: 下载目录位于系统分区: $DL_DIR"
+      fi
+    fi
 
     # 5b. 运行时依赖探测（S8 红线：deb 脚本严禁在线安装，缺失只提示）
     #     yt-dlp 是 Python zipapp，需要系统 python3；ffmpeg 用于合流；
@@ -169,13 +257,17 @@ EOF
     fi
     echo "  打开界面 : TOS 桌面 → yt-dlp Web UI 图标（新标签页打开 http://<NAS的IP>:8181/ytdlpwebui/）"
     echo "  使用方法 : 粘贴视频/播放列表链接 → 选择格式（或自动最高画质）→ 开始下载"
-    echo "  下载目录 : /var/lib/ytdlpwebui/downloads（默认；用应用内「文件浏览」取回文件）"
-    echo "             如需保存到共享卷，先在共享文件夹里给应用用户 ytdlpwebui 授权，"
-    echo "             再改 /usr/local/ytdlpwebui/ytdlpwebui.env 的 APP_PATHS_DOWNLOAD_PATH"
-    echo "  配置修改 : 编辑 /usr/local/ytdlpwebui/ytdlpwebui.env 后 systemctl restart ytdlpwebui"
+    echo "  下载目录 : $DL_DIR"
+    if [ "$DL_DIR" = "$OLD_DEFAULT_DL" ]; then
+      echo "             ⚠ 位于系统分区（容量小），建议改用数据卷共享文件夹（见上方安装警告）"
+      echo "             或在 TOS 控制面板给应用用户 $APP_USER 授权后改 APP_PATHS_DOWNLOAD_PATH"
+    else
+      echo "             （数据卷共享文件夹；文件管理器/SMB 直接可见，也可用应用内「文件浏览」取回）"
+    fi
+    echo "  配置修改 : 编辑 $APP_DIR/$APP_ID.env 后 systemctl restart ytdlpwebui"
     echo "  端口说明 : 仅监听 127.0.0.1:13033，不对外暴露端口（经 TOS nginx 路由访问）"
     echo "  运行时   : yt-dlp（官方 Python zipapp）+ quickjs-ng（随包）；ffmpeg 用 TOS 系统包"
-    echo "  数据目录 : /var/lib/ytdlpwebui（apt remove 保留，purge 删除）"
+    echo "  数据目录 : $DATA_DIR（apt remove 保留，purge 删除；下载目录另见上，purge 不删）"
     echo ""
     ;;
 esac

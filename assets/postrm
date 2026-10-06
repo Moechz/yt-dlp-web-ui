@@ -9,7 +9,11 @@ echo "$(date '+%F %T') postrm $*" >> "$MAINT_LOG" 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
 if [ "$1" = "purge" ]; then
-  # 队列数据库、下载文件、日志与配置（remove 时保留，purge 才全清）
+  # 队列数据库、日志与配置（remove 时保留，purge 才全清）
+  # 注意：下载共享文件夹 /Volume<N>/ytdlpwebui 属**用户数据**，purge 也不删除，
+  #       只提示位置（防止用户几百 GB 的下载被卸载动作清掉）。
+  DL_DIR=$(grep -E '^APP_PATHS_DOWNLOAD_PATH=' /usr/local/ytdlpwebui/ytdlpwebui.env 2>/dev/null | tail -1 | cut -d= -f2-)
+  echo "提示: 下载文件目录 $DL_DIR 未被删除（内含用户数据），如需清理请手动删除。" >&2
   rm -rf /var/lib/ytdlpwebui
   # 系统层注册文件（postinst 兜底安装的）
   rm -f /etc/systemd/system/ytdlpwebui.service
