@@ -169,3 +169,34 @@ sh -c 'echo "tos-1297 ytdlpweb-1297 rwxlta" | /usr/sbin/spcackload'
 
 **关键取证手法**：`application` 是 **UPX 加壳**的 Go 程序，磁盘 `strings` 搜不到这些提示句；
 必须 `strace -f -p $(pgrep -x application) -e trace=execve,exit_group -s 3000` 抓运行期。
+
+## D-015：出网代理必须写进服务的 EnvironmentFile（/etc/profile.d 无效）
+
+**现象（2026-10-06 真机）**：用户给 NAS 配了代理（`/etc/profile.d/profile_extend.sh` 里
+`export http_proxy=http://<lan-ip>:7890`），但应用里建 YouTube 任务仍然失败，日志表现为
+`yt-dlp process error: … Deprecated Feature: …`。
+
+**根因**：`/etc/profile.d/*.sh` 只被**登录 shell** source；systemd 服务不读它，
+因此 `ytdlpwebui` 进程（及其派生的 `yt-dlp`）环境里**没有 proxy**，
+`yt-dlp` 直连 YouTube 超时（`rc=124`）。
+
+**Decision**：代理写在 `/usr/local/ytdlpwebui/ytdlpwebui.env`（服务的 `EnvironmentFile`），
+并同时给出大小写四种变量名（`HTTP_PROXY`/`HTTPS_PROXY`/`http_proxy`/`https_proxy`）。
+随包模板已加注释示例；README 配置节同步说明。
+
+**验证**：改后 `/proc/<pid>/environ` 可见 proxy；`yt-dlp <youtube> -J` 走代理 `rc=0`
+（标题 + 48 个格式）；经应用 RPC 建 YouTube 任务 → 文件持续增长、后续 ffmpeg 合流。
+
+**同时发现并记录的两个自研/上游问题（待办）**：
+- **P1（自研，影响体验）**：TOS 系统 Python 3.10 → yt-dlp 每次运行都往 **stderr** 打
+  `Deprecated Feature: Support for Python version 3.10 has been deprecated…`
+  （`yt_dlp/update.py:_get_system_deprecation()`，`to_stderr(force=True)`，
+  `--no-warnings`/`--quiet` 均压不掉，已实测）。应用把 stderr 全文当错误返回
+  （`metadata/fetchers.go`），于是这句警告**顶在真错误前面**、日志每跑一次就一条红。
+  修法二选一：① 构建期给 zipapp 打一行补丁（`return None`）+ 记录到 PROVENANCE；
+  ② 随包 CPython 3.12+/3.13（metube 路线），彻底消除。
+- **P2（上游，影响 YouTube 画质）**：应用的**取元数据**命令是 `yt-dlp <url> -J`，
+  **没有**传 `--js-runtimes quickjs:…`（只有下载那条传了）→ 日志出现
+  `WARNING: [youtube] No supported JavaScript runtime could be found…`，
+  部分格式可能缺失。修法：构建期给 `metadata.DefaultFetcher` 补 `--js-runtimes`
+  （自研补丁，需随 PROVENANCE 记录）。

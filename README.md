@@ -62,6 +62,13 @@ apt install -y /tmp/ytdlpwebui.deb     # 会自动装齐 python3 / ffmpeg
 APP_PATHS_DOWNLOAD_PATH=/Volume1/media/downloads
 # 并发下载数
 APP_SERVER_QUEUE_SIZE=2
+# 出网代理（NAS 不能直连目标站点时需要；例如国内直连不了 YouTube）
+# ⚠️ 写在 /etc/profile.d/*.sh 里只对登录 shell 生效，systemd 服务不会继承——
+#    必须写在本文件里，应用派生的 yt-dlp 子进程才会用到。
+HTTP_PROXY=http://192.168.1.10:7890
+HTTPS_PROXY=http://192.168.1.10:7890
+http_proxy=http://192.168.1.10:7890
+https_proxy=http://192.168.1.10:7890
 ```
 
 > 说明：应用自身不做鉴权，访问由 TOS 网页服务（8181/5443）统一登录保护；后端只监听回环。
