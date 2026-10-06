@@ -36,6 +36,8 @@ case "$1" in
     # 3. 解压 webui.bz2（官方模板行为；External 模式下为占位页）
     if [ -f "$APP_DIR/webui.bz2" ]; then
       ( cd "$APP_DIR" && tar -xjf webui.bz2 2>/dev/null || true )
+      # 解压出的文件属 root:root，补一次属主（否则平台以非 root 读取入口页会失败）
+      chown -R $APP_USER:$APP_USER "$APP_DIR" 2>/dev/null || true
     fi
 
     # 4. 环境变量文件首装引导：仅在不存在时从随包模板复制（升级永不覆盖用户配置，
