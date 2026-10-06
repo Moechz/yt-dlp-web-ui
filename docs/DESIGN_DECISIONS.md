@@ -117,3 +117,21 @@ lang `auth` = `marcopiovanello`（作者归上游）。显示名带品牌 + 完�
 `CapabilityBoundingSet=`（空集）、`RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`、
 `RestrictSUIDSGID`、`PrivateTmp` 等；**不配 `Restart`**（S05）。
 `postinst` 内置 NNP 探测 + 最小降级 drop-in（坑 23）。
+
+## D-013：应用图标留白 —— 可见图形占画布 81–84%（用户定稿）
+
+**Decision**：`images/icons/ytdlpwebui.svg` 的背景圆角方块边长 = 画布 82.8%
+（`x=y=5.5 width=height=53 viewBox=0 0 64 64`），居中，四周透明留白；
+字形在方块内收。**禁止满幅 100%。**
+
+**背景 / 证据**：用户指出「图标占背景方块的 81–84%，不要全部占满」。
+交叉参照：`docker/authentik`（“图形缩至画布 84%、左右各留 8%”）、
+`pi-agent-desktop-fork`（“可见区 824/1024 ~80% 居中、四角全透明”）。
+满幅会让图标在 TOS 桌面上比其它应用大一圈。
+
+**与 caseconvert D-010 的差异**：caseconvert 曾把 87.5% 的图标改成满幅（100%）——
+那是当时「比别的图标显小」的过度修正；本规则为最新定稿，满幅不再采用。
+以后新项目一律按 81–84% 出图。
+
+**门禁**：`scripts/check_assets.py` 与 `build.sh verify` 双层断言
+「背景 rect 边长 / viewBox 边长 ∈ [0.81, 0.84] 且居中」。

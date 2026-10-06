@@ -96,6 +96,34 @@ try:
         problems.append(f"节点数 {len(list(root.iter()))} > 50")
     if not re.search(r'fill="#[0-9a-fA-F]{3,8}"', icon_text):
         problems.append("无填充色")
+    # 图标占比规范（用户定稿）：可见图形占画布 81–84%、居中、四周透明留白
+    vb = (root.get("viewBox") or "").split()
+    rects = [e for e in root.iter() if e.tag.endswith("rect")]
+    bg = None
+    for r in rects:
+        try:
+            area = float(r.get("width", 0)) * float(r.get("height", 0))
+        except ValueError:
+            continue
+        if bg is None or area > bg[0]:
+            bg = (area, r)
+    if len(vb) != 4:
+        problems.append("viewBox 不是 4 个数值")
+    elif bg is None:
+        problems.append("缺少背景方块 rect")
+    else:
+        side = float(vb[2])
+        try:
+            w = float(bg[1].get("width")); h = float(bg[1].get("height"))
+            x = float(bg[1].get("x", 0)); y = float(bg[1].get("y", 0))
+        except (TypeError, ValueError):
+            problems.append("背景方块 rect 宽高/x/y 非数值")
+        else:
+            ratio = max(w, h) / side
+            if not (0.81 <= ratio <= 0.84):
+                problems.append(f"背景方块画布占比 {ratio:.3f} 不在 81–84%")
+            if abs(x - (side - w) / 2) > 0.5 or abs(y - (side - h) / 2) > 0.5:
+                problems.append("背景方块未居中")
     for bad in ("filter", "use", "namedview", "metadata", "sodipodi", "inkscape"):
         if bad in icon_text:
             problems.append(f"含禁用元素 {bad}")
@@ -103,7 +131,7 @@ try:
         print(f"icon: {'; '.join(problems)} ✗")
         fail = 1
     else:
-        print(f"icon: 合法 ✓（{len(icon_bytes)}B, {len(list(root.iter()))} 节点）")
+        print(f"icon: 合法 ✓（{len(icon_bytes)}B, {len(list(root.iter()))} 节点, 画布占比 {max(float(bg[1].get('width')), float(bg[1].get('height')))/float(root.get('viewBox').split()[2]):.3f}）")
 except ET.ParseError as e:
     print(f"icon: SVG 非法 XML（截断/损坏）✗ ({e})")
     fail = 1
