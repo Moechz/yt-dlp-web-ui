@@ -27,3 +27,6 @@
 - 构建：`source`（本仓库公开 CI 从源码构建，可提交）/ `compat`（本地迭代，禁止提交）双模式；
   fetch 阶段 sha256 双层校验（CI SHA256SUMS + config.env pin）。
 - 文档：`AGENTS.md` / `HANDOFF.md` / `docs/{TASK_STATE,DESIGN_DECISIONS,SOURCE-AUDIT,CHANGELOG}.md`。
+- 真机验证（TOS 7 / x86_64）：`apt install` 后服务 active+enabled、仅监听回环、
+  TOS 网关路由（301→5443 后 200）、WebSocket 101、经 RPC 真实下载文件成功、升级保数据、
+  `apt remove` 保数据 / `apt purge` 全清；修复 `index.html` 解压后属主未归一的问题。
