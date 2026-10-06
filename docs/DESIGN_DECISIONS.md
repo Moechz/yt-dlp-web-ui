@@ -135,3 +135,37 @@ lang `auth` = `marcopiovanello`（作者归上游）。显示名带品牌 + 完�
 
 **门禁**：`scripts/check_assets.py` 与 `build.sh verify` 双层断言
 「背景 rect 边长 / viewBox 边长 ∈ [0.81, 0.84] 且居中」。
+
+## D-014：应用中心安装报 `Command execute error / App state will be deleted` = 平台缺 SmackFS（与包无关）
+
+**现象（2026-10-06 真机 strace 实锤）**：应用中心「手动安装」本包后，
+`journalctl -u application` 出现：
+
+```
+DEBUG /usr/bin/systemctl disable ytdlpwebui
+Shell execute error. ... Unit file ... does not exist.   ← 首次安装必现的非致命噪音
+dpkg -i 成功 + postinst 成功
+Command execute error. Error=exit status 1
+App state will be deleted. AppID=ytdlpwebui
+```
+
+界面表现为「安装中」卡住/失败，但**注册产物其实齐全**（23 个 `@desktop/yt-dlp Web UI.*.oexe`、
+`/etc/sc.d/ytdlpwebui`、`install_data.json`、`accesses.d` 行），`dpkg -l` = ii、
+服务 active、`https://<nas>:5443/ytdlpwebui/` = 200 → **安装实际成功**。
+
+**确切失败命令（strace 抓到）**：
+
+```
+sh -c 'echo "tos-1297 ytdlpweb-1297 rwxlta" | /usr/sbin/spcackload'
+→ /usr/sbin/spcackload: "SmackFS is not mounted."  rc=1
+```
+
+**根因**：平台安装收尾无条件把应用访问行喂给 `spcackload`（SMACK 加载器）；
+本 NAS 内核无 SMACK/SmackFS（`/proc/filesystems` 无 smack、无 `/sys/fs/smackfs`、无 smack 模块），
+`spcackload` 必 exit 1 → 平台回滚内存状态。**mediamtx 同机 sideload 也报同一条** → 平台缺陷，非本包问题。
+
+**处置**：不动包；刷新应用中心页面即可（图标/入口会正常出现）。
+不改 `/usr/sbin/spcackload`、不挂 smackfs。已回灌打包指南坑 11b。
+
+**关键取证手法**：`application` 是 **UPX 加壳**的 Go 程序，磁盘 `strings` 搜不到这些提示句；
+必须 `strace -f -p $(pgrep -x application) -e trace=execve,exit_group -s 3000` 抓运行期。
